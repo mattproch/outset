@@ -35,6 +35,12 @@ permissions:
 jobs:
   build:
     runs-on: macos-14 # Apple Silicon
+    # Repeat at the job level. The workflow-level `permissions:` block
+    # above SHOULD be enough, but in some repos GitHub's permissions
+    # resolver needs it declared on the job that actually consumes the
+    # token (tauri-action calls the Releases API with GITHUB_TOKEN).
+    permissions:
+      contents: write
     env:
       # Single target — referenced by Rust toolchain install, sidecar
       # build, and tauri-action's `args`. Hoisted to env so adding
