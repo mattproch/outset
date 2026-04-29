@@ -1,0 +1,101 @@
+# Release workflow for Outset.
+#
+# Triggers on a tag push that looks like a semver (v0.0.2, v1.2.3, etc.).
+# Builds the app for macOS arm64 + x86_64, signs the artifacts using a
+# minisign keypair stored in GitHub Secrets, uploads the bundles to a
+# GitHub Release named after the tag, and writes a `latest.json` manifest
+# alongside them so `@tauri-apps/plugin-updater` can find the new version.
+#
+# Setup once, locally:
+#   yarn tauri signer generate -w ~/.tauri/outset.key
+#       → writes a private key (KEEP SECRET) and prints the public key.
+#   - Put the public key in src-tauri/tauri.conf.json under
+#     plugins.updater.pubkey.
+#   - Add the contents of ~/.tauri/outset.key to GitHub repository
+#     secrets as TAURI_SIGNING_PRIVATE_KEY.
+#   - Add the password you used (or empty) as TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+#
+# Cutting a release:
+#   git tag v0.0.2 && git push origin v0.0.2
+#   → CI builds, signs, publishes a Release, and users on prior versions
+#     see the update banner on next launch.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # Apple Silicon
+            target: aarch64-apple-darwin
+          - os: macos-13 # Intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install JS dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build sidecar (typecheck only — sidecar runs from source via tsx)
+        run: yarn sidecar:typecheck
+
+      - name: Build + sign Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Minisign keys for the in-app auto-updater. Distinct from the
+          # Apple signing path below — these protect update integrity,
+          # those satisfy macOS Gatekeeper.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple Developer ID code signing. tauri-action picks these up
+          # automatically: it imports the .p12 into a temporary keychain
+          # for the build step, signs with APPLE_SIGNING_IDENTITY, then
+          # cleans up. Notarization runs as a follow-up using the Apple
+          # ID + app-specific password + Team ID.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Outset ${{ github.ref_name }}"
+          releaseBody: |
+            See the commits since the previous release for what changed.
+
+            On launch, the app checks for this release automatically and
+            offers an in-place update via the bottom-right banner.
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}

@@ -1,0 +1,23 @@
+{
+  "name": "outset-sidecar",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Outset's Node sidecar — wraps the Claude Agent SDK and streams NDJSON events over stdio for the Tauri host to consume.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.119"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

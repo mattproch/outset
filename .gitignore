@@ -1,0 +1,27 @@
+node_modules/
+sandbox/
+*.log
+.DS_Store
+.env
+.env.local
+dist/
+out/
+*.jsonl
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/schemas
+# Note: Cargo.lock IS committed for binary crates (which Tauri apps are) so
+# builds are reproducible. Don't add it to this gitignore.
+
+# Vite cache
+.vite/
+
+# Yarn — keep yarn.lock, ignore caches and PnP artifacts (defensive in case of Berry)
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*

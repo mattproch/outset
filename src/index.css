@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
+body,
+#root {
+  /* App canvas. A medium-dark grey, between zinc-900 (24,24,27) and
+     zinc-800 (39,39,42). Cards layer on top with a slightly lighter
+     fill, and the tray that wraps them is a touch darker — so depth
+     reads through value differences rather than borders. Set on html
+     and #root too so the Tauri WebView doesn't show its own default
+     white/black flash before paint. */
+  background: rgb(34 34 37);
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: rgb(228 228 231);
+  /* SF Pro on macOS, Inter / Segoe / Roboto elsewhere. No webfont fetch
+     so we don't depend on the network and Tauri's CSP. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+
+/**
+ * Serif stack for prose surfaces — chat bubbles and spec markdown.
+ * "New York" is Apple's modern serif (ships with macOS); Iowan Old Style
+ * and Charter are macOS-bundled fallbacks; Georgia covers everything
+ * else. UI chrome (tabs, buttons, sidebar) stays in the body's sans
+ * stack — this class is opt-in per surface.
+ */
+.font-serif-prose {
+  font-family: "New York", "Iowan Old Style", "Charter", Georgia,
+    "Times New Roman", serif;
+}
+
+/* Lightweight scrollbar in the chat area */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgb(63 63 70);
+  border-radius: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
