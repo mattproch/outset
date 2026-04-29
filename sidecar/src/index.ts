@@ -55,10 +55,68 @@ import {
   type SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import { SPEC_MODE_PROMPT } from "./specPrompt.js";
+
+/**
+ * Locate the `claude` CLI binary on the user's machine.
+ *
+ * The SDK normally finds its native binary via an optional sub-package
+ * inside its own node_modules (e.g. `@anthropic-ai/claude-code-darwin-arm64`).
+ * That works fine when the sidecar runs from source via `tsx`. But the
+ * shipped Outset binary is built with `bun build --compile`, which
+ * inlines JS modules but can't bundle the native executable from an
+ * optional dep — so the SDK's auto-resolver throws "Native CLI binary
+ * for darwin-arm64 not found".
+ *
+ * Workaround surfaced by the error itself: pass
+ * `options.pathToClaudeCodeExecutable` explicitly. We resolve it by:
+ *   1. Walking $PATH for an executable named `claude`.
+ *   2. Falling back to the install locations Claude Code commonly lands
+ *      in on macOS (Homebrew prefixes, npm-global variants, volta).
+ *
+ * Returns null when nothing matches; the caller then emits a fatal
+ * event so the user sees a clear message rather than an SDK trace.
+ */
+async function findClaudeBin(): Promise<string | null> {
+  // 1. Walk PATH. `which claude` would be one shell out away, but doing
+  // it manually keeps us off bash/zsh assumptions and works whether or
+  // not the GUI launch env included a usable PATH.
+  const pathEnv = process.env.PATH ?? "";
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, "claude");
+    if (await isFile(candidate)) return candidate;
+  }
+  // 2. Common macOS install locations. Order roughly by likelihood.
+  const home = homedir();
+  const fallbacks = [
+    "/opt/homebrew/bin/claude", // Apple Silicon Homebrew
+    "/usr/local/bin/claude", // Intel Homebrew + many manual installs
+    path.join(home, ".npm-global/bin/claude"),
+    path.join(home, ".npm/bin/claude"),
+    path.join(home, ".local/bin/claude"),
+    path.join(home, ".volta/bin/claude"),
+    path.join(home, ".config/yarn/global/node_modules/.bin/claude"),
+  ];
+  for (const c of fallbacks) {
+    if (await isFile(c)) return c;
+  }
+  return null;
+}
+
+async function isFile(p: string): Promise<boolean> {
+  try {
+    const st = await fs.stat(p);
+    return st.isFile();
+  } catch {
+    return false;
+  }
+}
 
 // ---------- types ----------
 
@@ -326,11 +384,26 @@ async function runSend(cmd: SendCommand): Promise<boolean> {
         ? "default"
         : "acceptEdits";
 
+  // The bun-compiled sidecar can't rely on the SDK's auto-resolver to
+  // find the claude CLI binary (see findClaudeBin's docstring). Resolve
+  // it ourselves and pass it through.
+  const claudeBin = await findClaudeBin();
+  if (!claudeBin) {
+    emit({
+      kind: "fatal",
+      message:
+        "Couldn't find the `claude` CLI on this Mac. Install Claude Code " +
+        "(https://docs.anthropic.com/claude/docs/claude-code) and try again.",
+    });
+    return false;
+  }
+
   const q = query({
     prompt: cmd.prompt,
     options: {
       cwd: cmd.cwd,
       ...modeOptions,
+      pathToClaudeCodeExecutable: claudeBin,
       permissionMode: sdkPermissionMode,
       // Routes through pendingPermissions + the host's modal. The SDK only
       // calls this for tools that need permission given the active mode:

@@ -991,6 +991,37 @@ async fn spawn_sidecar_with_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Broaden PATH for the child. macOS GUI launches inherit a minimal
+    // PATH from launchd (typically just /usr/bin:/bin:/usr/sbin:/sbin),
+    // which won't include Homebrew (/opt/homebrew/bin), npm-global
+    // installs (~/.npm-global/bin), or volta — all common claude-code
+    // install locations. The sidecar's findClaudeBin() walks PATH first,
+    // so prepending these here makes the lookup actually work in the
+    // shipped app. No-op when the user's PATH already has them.
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let extras = [
+            "/opt/homebrew/bin".to_string(),
+            "/usr/local/bin".to_string(),
+            format!("{home}/.npm-global/bin"),
+            format!("{home}/.npm/bin"),
+            format!("{home}/.local/bin"),
+            format!("{home}/.volta/bin"),
+        ];
+        let current = std::env::var("PATH").unwrap_or_default();
+        let mut parts: Vec<String> = current
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        for p in extras {
+            if !parts.iter().any(|x| x == &p) {
+                parts.push(p);
+            }
+        }
+        cmd_builder.env("PATH", parts.join(":"));
+    }
     // Sidecar leader of its own process group so Stop takes down both the
     // Node process AND the claude subprocess it spawns.
     #[cfg(unix)]
