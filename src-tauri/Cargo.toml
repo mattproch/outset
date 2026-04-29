@@ -1,6 +1,6 @@
 [package]
 name = "outset"
-version = "0.0.1"
+version = "0.0.2"
 description = "Outset — spec-driven development with Claude"
 authors = ["you"]
 edition = "2021"

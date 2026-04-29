@@ -11,6 +11,16 @@ out/
 # Tauri / Rust
 src-tauri/target/
 src-tauri/gen/schemas
+# Bun-compiled sidecar binaries — produced per-target by scripts/build-sidecar.mjs
+# and bundled into the app via tauri.conf.json `bundle.externalBin`. Always
+# regenerated; never committed.
+src-tauri/binaries/
+# bun's `--compile` writes a hidden temp file (`.<hash>-<n>.bun-build`) in
+# the current working dir while linking the runtime. If the build is
+# interrupted or runs from the repo root, this temp file gets stranded —
+# always ignore so it never sneaks into a commit.
+.*.bun-build
+*.bun-build
 # Note: Cargo.lock IS committed for binary crates (which Tauri apps are) so
 # builds are reproducible. Don't add it to this gitignore.
 

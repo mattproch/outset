@@ -52,6 +52,15 @@ jobs:
           node-version: 20
           cache: yarn
 
+      - name: Setup Bun
+        # Used only by `yarn sidecar:build` below. The sidecar is bundled
+        # into a single self-contained executable via `bun build --compile`
+        # so the shipped app doesn't need Node, tsx, or node_modules at
+        # runtime.
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -65,8 +74,17 @@ jobs:
       - name: Install JS dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Build sidecar (typecheck only — sidecar runs from source via tsx)
+      - name: Typecheck sidecar
         run: yarn sidecar:typecheck
+
+      - name: Build sidecar binary
+        # Compiles sidecar/src/index.ts to
+        # src-tauri/binaries/outset-sidecar-${{ matrix.target }}, which
+        # tauri.conf.json's bundle.externalBin then ships inside the app.
+        # `tauri-action` below also runs sidecar:build via beforeBuildCommand,
+        # but doing it explicitly here gives us a clear failure point and a
+        # cached step.
+        run: yarn sidecar:build --target=${{ matrix.target }}
 
       - name: Build + sign Tauri app
         uses: tauri-apps/tauri-action@v0

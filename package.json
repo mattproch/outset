@@ -1,7 +1,7 @@
 {
   "name": "outset",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "workspaces": [
     "sidecar",
@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "tauri": "tauri",
-    "sidecar:typecheck": "yarn workspace outset-sidecar typecheck"
+    "sidecar:typecheck": "yarn workspace outset-sidecar typecheck",
+    "sidecar:build": "node scripts/build-sidecar.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

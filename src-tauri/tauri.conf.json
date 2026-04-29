@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Outset",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "identifier": "com.outset.app",
   "build": {
-    "beforeDevCommand": "yarn dev",
+    "beforeDevCommand": "yarn sidecar:build && yarn dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "yarn build",
+    "beforeBuildCommand": "yarn sidecar:build && yarn build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -44,6 +44,9 @@
     "shortDescription": "Spec-driven development with Claude",
     "longDescription": "Outset is a macOS app for spec-driven development with Claude Code. Manage projects as folders, write structured specs in markdown, and run multiple AI sessions per project.",
     "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/outset-sidecar"
+    ],
     "macOS": {
       "minimumSystemVersion": "10.15",
       "hardenedRuntime": true

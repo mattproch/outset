@@ -890,19 +890,49 @@ async fn read_optional(path: &Path) -> Result<String, String> {
 
 // ---------- sidecar spawn plumbing ----------
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// Locate the bundled sidecar binary.
+///
+/// The sidecar is a `bun build --compile` output listed in
+/// `tauri.conf.json` under `bundle.externalBin`, so Tauri ships it next
+/// to the main app binary in every build:
+///   - macOS .app:  `Outset.app/Contents/MacOS/outset-sidecar`
+///   - dev / debug: `target/{debug,release}/outset-sidecar`
+///
+/// Both layouts are reachable via `current_exe().parent()`. We deliberately
+/// don't use `env!("CARGO_MANIFEST_DIR")` anymore — that's a compile-time
+/// constant baked from whatever path the binary was built on, which makes
+/// CI builds fail to find anything when distributed.
+fn sidecar_bin() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("can't locate current exe: {e}"))?;
+    let dir = exe
         .parent()
-        .expect("src-tauri must have a parent directory")
-        .to_path_buf()
+        .ok_or_else(|| "current exe has no parent dir".to_string())?;
+    let bin_name = if cfg!(windows) {
+        "outset-sidecar.exe"
+    } else {
+        "outset-sidecar"
+    };
+    let candidate = dir.join(bin_name);
+    if candidate.exists() {
+        Ok(candidate)
+    } else {
+        Err(format!(
+            "Sidecar binary not found at {}. \
+             Run `yarn sidecar:build` or `yarn tauri dev` (which runs it automatically).",
+            candidate.display()
+        ))
+    }
 }
 
-fn tsx_bin() -> PathBuf {
-    repo_root().join("node_modules").join(".bin").join("tsx")
-}
-
-fn sidecar_entry() -> PathBuf {
-    repo_root().join("sidecar").join("src").join("index.ts")
+/// Fallback project dir for the rare case a command JSON arrives without
+/// a usable cwd. Used to be `repo_root()`; now resolves to the directory
+/// of the running app — close enough for an error-path default.
+fn fallback_project_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Kill a sidecar AND every process it spawned (the claude subprocess).
@@ -941,35 +971,21 @@ async fn spawn_sidecar_with_command(
         }
     }
 
-    let tsx = tsx_bin();
-    let entry_path = sidecar_entry();
-    if !tsx.exists() {
-        return Err(format!(
-            "tsx not found at {}. Did you run `yarn install` at the repo root?",
-            tsx.display()
-        ));
-    }
-    if !entry_path.exists() {
-        return Err(format!(
-            "sidecar entry not found at {}.",
-            entry_path.display()
-        ));
-    }
+    let sidecar = sidecar_bin()?;
 
     // Decode the user-provided cwd from the command JSON so we can spawn the
     // sidecar in the project folder. This way the whole chain (sidecar →
     // Claude Code subprocess) runs with the project dir as its OS cwd, not
-    // just the SDK's logical cwd. Falls back to repo_root if the JSON
-    // doesn't have a cwd field (e.g. a malformed command).
+    // just the SDK's logical cwd. Falls back to a generic dir when the
+    // command JSON is malformed (an error path that shouldn't really hit).
     let project_dir = serde_json::from_str::<serde_json::Value>(&command_json)
         .ok()
         .and_then(|v| v.get("cwd").and_then(|c| c.as_str()).map(PathBuf::from))
         .filter(|p| p.is_dir())
-        .unwrap_or_else(repo_root);
+        .unwrap_or_else(fallback_project_dir);
 
-    let mut cmd_builder = Command::new(&tsx);
+    let mut cmd_builder = Command::new(&sidecar);
     cmd_builder
-        .arg(&entry_path)
         .current_dir(&project_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1198,9 +1214,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
-                println!("[outset] repo root:     {}", repo_root().display());
-                println!("[outset] tsx bin:       {}", tsx_bin().display());
-                println!("[outset] sidecar entry: {}", sidecar_entry().display());
+                match sidecar_bin() {
+                    Ok(p) => println!("[outset] sidecar bin:   {}", p.display()),
+                    Err(e) => println!("[outset] sidecar bin:   <missing> ({e})"),
+                }
                 if let Ok(p) = state_file_path(app.handle()) {
                     println!("[outset] state file:    {}", p.display());
                 }
