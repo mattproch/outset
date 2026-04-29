@@ -1,10 +1,12 @@
 # Release workflow for Outset.
 #
 # Triggers on a tag push that looks like a semver (v0.0.2, v1.2.3, etc.).
-# Builds the app for macOS arm64 + x86_64, signs the artifacts using a
-# minisign keypair stored in GitHub Secrets, uploads the bundles to a
-# GitHub Release named after the tag, and writes a `latest.json` manifest
-# alongside them so `@tauri-apps/plugin-updater` can find the new version.
+# Builds the app for macOS arm64 only — Intel was dropped to halve runner
+# cost and because Apple Silicon has been the only target worth shipping
+# for a while. Signs the artifacts using a minisign keypair stored in
+# GitHub Secrets, uploads the bundles to a GitHub Release named after the
+# tag, and writes a `latest.json` manifest alongside them so
+# `@tauri-apps/plugin-updater` can find the new version.
 #
 # Setup once, locally:
 #   yarn tauri signer generate -w ~/.tauri/outset.key
@@ -32,22 +34,23 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14 # Apple Silicon
-            target: aarch64-apple-darwin
-          - os: macos-13 # Intel
-            target: x86_64-apple-darwin
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-14 # Apple Silicon
+    env:
+      # Single target — referenced by Rust toolchain install, sidecar
+      # build, and tauri-action's `args`. Hoisted to env so adding
+      # another target in the future is a one-line matrix change.
+      TARGET: aarch64-apple-darwin
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        # Bumped past v4 (Node 20 runtime, deprecated) and v5 to land on
+        # the current major. The `node-version` below is what the action
+        # installs for our build steps — separate from the runtime the
+        # action itself runs on.
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: yarn
@@ -64,7 +67,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ env.TARGET }}
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -79,12 +82,12 @@ jobs:
 
       - name: Build sidecar binary
         # Compiles sidecar/src/index.ts to
-        # src-tauri/binaries/outset-sidecar-${{ matrix.target }}, which
+        # src-tauri/binaries/outset-sidecar-${{ env.TARGET }}, which
         # tauri.conf.json's bundle.externalBin then ships inside the app.
         # `tauri-action` below also runs sidecar:build via beforeBuildCommand,
         # but doing it explicitly here gives us a clear failure point and a
         # cached step.
-        run: yarn sidecar:build --target=${{ matrix.target }}
+        run: yarn sidecar:build --target=${{ env.TARGET }}
 
       - name: Build + sign Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -116,4 +119,4 @@ jobs:
             offers an in-place update via the bottom-right banner.
           releaseDraft: false
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ env.TARGET }}
