@@ -5,15 +5,22 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 /**
- * Auto-update affordance. On mount we ask the updater plugin whether a
- * newer version is available at the configured endpoint
- * (plugins.updater.endpoints in tauri.conf.json) and surface it as a
- * non-blocking banner in the bottom-right corner. The user clicks
- * "Install" to download + apply, then the app relaunches.
+ * Auto-update affordance.
+ *
+ * Renders inline as a card — meant to be placed inside an existing
+ * container (the project sidebar's bottom slot, or the dashboard
+ * footer). Used to be a fixed-position bottom-right toast; the inline
+ * shape integrates better visually now that the sidebar has a settled
+ * bottom area.
+ *
+ * On mount the updater plugin polls the configured endpoint
+ * (plugins.updater.endpoints in tauri.conf.json). When there's a newer
+ * version, the card flips into the "available" phase with an Install
+ * button that downloads, applies, and relaunches the app.
  *
  * In dev (`yarn tauri dev`) the updater is usually a no-op because the
  * dev binary version matches the manifest's published version — the
- * banner just won't show.
+ * card just stays hidden.
  */
 type Phase =
   | { kind: "idle" }
@@ -73,13 +80,15 @@ export function UpdateBanner(): ReactElement | null {
 
   if (phase.kind === "idle" || dismissed) return null;
 
-  const baseCls =
-    "fixed bottom-4 right-4 z-50 w-[300px] rounded-lg bg-[rgb(42_42_46)] px-4 py-3 text-[13px] text-zinc-100 shadow-xl ring-1 ring-zinc-700/60";
+  // Inline card: caller controls placement (sidebar bottom slot,
+  // dashboard footer, etc). No `fixed` / `absolute` here.
+  const cardCls =
+    "rounded-lg bg-zinc-800/70 px-3 py-2.5 text-[12.5px] text-zinc-100 ring-1 ring-zinc-700/60";
 
   if (phase.kind === "available") {
     const update = phase.update;
     return (
-      <div className={baseCls}>
+      <div className={cardCls}>
         <div className="mb-1 flex items-baseline justify-between gap-2">
           <span className="font-semibold">Update available</span>
           <button
@@ -90,19 +99,19 @@ export function UpdateBanner(): ReactElement | null {
             ×
           </button>
         </div>
-        <div className="mb-3 text-[12px] text-zinc-400">
-          Outset {update.version} is ready to install.
+        <div className="mb-2 text-[11.5px] text-zinc-400">
+          Outset {update.version} is ready.
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-1.5">
           <button
             onClick={() => setDismissed(true)}
-            className="rounded-md px-2.5 py-1 text-[12px] text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
+            className="rounded-md px-2 py-1 text-[11.5px] text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
           >
             Later
           </button>
           <button
             onClick={() => void install(update)}
-            className="rounded-md bg-zinc-100 px-2.5 py-1 text-[12px] font-medium text-zinc-900 hover:bg-white"
+            className="rounded-md bg-zinc-100 px-2 py-1 text-[11.5px] font-medium text-zinc-900 hover:bg-white"
           >
             Install
           </button>
@@ -116,12 +125,14 @@ export function UpdateBanner(): ReactElement | null {
       ? Math.min(100, Math.round((phase.downloaded / phase.total) * 100))
       : null;
     return (
-      <div className={baseCls}>
+      <div className={cardCls}>
         <div className="mb-1 font-semibold">Downloading update…</div>
-        <div className="mb-2 text-[12px] text-zinc-400">
-          {pct != null ? `${pct}%` : `${(phase.downloaded / 1024 / 1024).toFixed(1)} MB`}
+        <div className="mb-2 text-[11.5px] text-zinc-400">
+          {pct != null
+            ? `${pct}%`
+            : `${(phase.downloaded / 1024 / 1024).toFixed(1)} MB`}
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-900/60">
           <div
             className="h-full bg-emerald-500 transition-[width] duration-150"
             style={{ width: pct != null ? `${pct}%` : "30%" }}
@@ -133,16 +144,16 @@ export function UpdateBanner(): ReactElement | null {
 
   if (phase.kind === "installed") {
     return (
-      <div className={baseCls}>
+      <div className={cardCls}>
         <div className="font-semibold text-emerald-300">Update installed</div>
-        <div className="text-[12px] text-zinc-400">Relaunching…</div>
+        <div className="text-[11.5px] text-zinc-400">Relaunching…</div>
       </div>
     );
   }
 
   // error
   return (
-    <div className={baseCls}>
+    <div className={cardCls}>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="font-semibold text-red-300">Update failed</span>
         <button
@@ -153,7 +164,7 @@ export function UpdateBanner(): ReactElement | null {
           ×
         </button>
       </div>
-      <div className="text-[12px] text-zinc-400">{phase.message}</div>
+      <div className="text-[11.5px] text-zinc-400">{phase.message}</div>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
 import type { SpecQuestion, SpecTask } from "./specParsers";
 import { Markdown } from "./Markdown";
 import { UpdateBanner } from "./UpdateBanner";
+import { VersionFooter } from "./VersionFooter";
 import {
   APP_STATE_VERSION,
   DEFAULT_PERMISSION_MODE,
@@ -1532,7 +1533,9 @@ export default function App(): ReactElement {
         queueLength={permissionQueue.length}
         onResolve={resolvePermission}
       />
-      <UpdateBanner />
+      {/* UpdateBanner is now mounted inline — see ProjectSidebar's
+          bottom slot for the in-project view, and Dashboard's footer
+          for the no-project view. */}
     </div>
   );
 }
@@ -1983,6 +1986,13 @@ function ProjectSidebar({
         )}
       </div>
 
+      {/* Update banner — shown only when an update is available, sits
+          directly above the settings divider so it's prominent without
+          competing with chat content. */}
+      <div className="flex-none px-2 pb-2 empty:hidden">
+        <UpdateBanner />
+      </div>
+
       {/* Bottom: settings (⋮) */}
       <div className="flex-none border-t border-zinc-700/30 p-2">
         <ProjectSettingsButton
@@ -2198,30 +2208,31 @@ function Dashboard({
   }
 
   return (
-    <div className="scrollbar-thin flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-2xl px-8 pb-16 pt-10">
-        <div className="mb-6 flex items-baseline justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
-            Projects
-          </h1>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setCloneErr(null);
-                setCloneOpen((v) => !v);
-              }}
-              className="rounded-md bg-zinc-800/70 px-3 py-1.5 text-[12.5px] text-zinc-200 ring-1 ring-zinc-700/60 transition-colors hover:bg-zinc-800"
-            >
-              + From Git
-            </button>
-            <button
-              onClick={onAdd}
-              className="rounded-md bg-zinc-800/70 px-3 py-1.5 text-[12.5px] text-zinc-200 ring-1 ring-zinc-700/60 transition-colors hover:bg-zinc-800"
-            >
-              + Add project
-            </button>
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="scrollbar-thin flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-2xl px-8 pb-16 pt-10">
+          <div className="mb-6 flex items-baseline justify-between gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
+              Projects
+            </h1>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setCloneErr(null);
+                  setCloneOpen((v) => !v);
+                }}
+                className="rounded-md bg-zinc-800/70 px-3 py-1.5 text-[12.5px] text-zinc-200 ring-1 ring-zinc-700/60 transition-colors hover:bg-zinc-800"
+              >
+                + From Git
+              </button>
+              <button
+                onClick={onAdd}
+                className="rounded-md bg-zinc-800/70 px-3 py-1.5 text-[12.5px] text-zinc-200 ring-1 ring-zinc-700/60 transition-colors hover:bg-zinc-800"
+              >
+                + Add project
+              </button>
+            </div>
           </div>
-        </div>
 
         {cloneOpen && (
           <div className="mb-6 rounded-xl bg-zinc-800/30 p-3 ring-1 ring-zinc-800/60">
@@ -2323,7 +2334,18 @@ function Dashboard({
             ))}
           </ul>
         )}
+        </div>
       </div>
+      {/* Pinned footer: update card (when an update is available) and
+          the version. The scroll area above keeps the project list
+          scrollable while the version stays visible at the bottom of
+          the dashboard chrome. */}
+      <div className="flex-none px-4 pb-1 empty:hidden">
+        <div className="mx-auto max-w-2xl">
+          <UpdateBanner />
+        </div>
+      </div>
+      <VersionFooter />
     </div>
   );
 }
