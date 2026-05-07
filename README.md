@@ -1,22 +1,23 @@
 # Outset
 
-A macOS app for spec-driven development with Claude Code. Each project is a folder. Inside each project: a structured spec (markdown), a task list, and one or more Claude Agent SDK sessions that execute work against the spec. Connectors (Jira, Linear, etc.) attach to projects via MCP.
+A macOS app for spec-driven development with Claude Code. Each project is a folder. Inside each project: a structured spec (markdown under `.spec/`), a task list, and one or more Claude Agent SDK sessions that execute work against the spec. Connectors (Jira, Linear, etc.) attach to projects via MCP.
 
-> The folder this repo lives in is currently named `termi` for historical reasons. Rename it to `outset` in Finder anytime — nothing inside references the folder name.
+> The repo folder is named `termi` for historical reasons; nothing inside references the folder name, so feel free to rename to `outset` locally.
 
-## Status: Week 2 — Tauri shell
+## Status: v0.0.4
 
-Week 1 ([SPIKE.md](./SPIKE.md)) validated that the Claude Agent SDK works with subscription auth and streams cleanly through piped stdio. Week 2 wraps that into a real desktop app: pick a folder, chat with Claude in the context of that folder, watch it edit files.
+The app is usable day-to-day for its core loop: pick a folder, chat with Claude in the context of that folder, watch it draft and maintain a `.spec/` tree (product/codebase/tasks) while you implement in your own editor.
 
-What works in week 2:
-- Tauri 2 + React + Vite + Tailwind shell
-- A Node sidecar that wraps the Agent SDK and streams NDJSON events over stdio
-- Folder picker via the system dialog
-- Single chat session per app run, with multi-turn (sessions resume by id)
-- Tool calls and results render distinctly from assistant text
-- `acceptEdits` permission mode — Claude edits files without asking; we'll wire a real permission UI in week 3
+What works:
+- Tauri 2 + React + Vite + Tailwind shell, with auto-updater wired through `tauri-plugin-updater`.
+- A Node sidecar that wraps the Agent SDK and streams NDJSON events over stdio. One sidecar process per user message; multi-turn conversations resume by SDK session id.
+- Multi-project sidebar with per-project color, permission mode, and persisted session history (single `state.json` in the OS app-data dir).
+- Spec mode — Claude reads/writes `.spec/product/`, `.spec/codebase/`, and `.spec/tasks/TASK-NNN/` with a custom system prompt, clarifying-question loop, and a task dashboard rendered from the file tree.
+- A right-hand git panel: status, per-file diff, commit, push, init, clone, set/remove origin.
+- Filesystem watcher on `.spec/` — external edits (your editor, `git pull`, Claude mid-turn) are reflected in the UI within ~250 ms, without forcing a project switch or a manual refresh.
+- Permission modes per project: `ask`, `acceptEdits`, `bypassAll`.
 
-Cuts: no project list, no spec system, no MCP yet, no settings panel.
+Not yet: MCP server config UI, code-sign + notarize for distributed builds, crash recovery.
 
 ## Repo layout
 
@@ -37,18 +38,16 @@ The `package.json` at the root declares Yarn workspaces for `sidecar` and `spike
 
 - **macOS 12+** with command-line tools (`xcode-select --install`).
 - **Rust toolchain** via [rustup](https://rustup.rs): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The first build will pull a few hundred MB of crates; later builds are incremental.
-- **Node 20+** (you're on 24, that's fine).
+- **Node 20+**.
 - **Yarn 1.22.x** (`npm install -g yarn`).
 - **`claude` CLI logged in** — `claude login` if not. Outset uses your subscription auth; no API key required.
 
 ## First-run setup
 
-You're coming from week 1 with a partial install at the repo root. Clean it up, then install fresh:
-
 ```bash
-cd ~/Development/Matyas\ Prochazka/termi      # rename to outset whenever
-rm -rf node_modules sandbox spike/node_modules spike/yarn.lock
-yarn install                                   # pulls Tauri frontend + sidecar + spike deps
+git clone <this repo>
+cd outset            # or whatever you named the folder
+yarn install         # pulls Tauri frontend + sidecar deps via Yarn workspaces
 ```
 
 Then for the very first run, the Rust side will compile from scratch (~3 minutes the first time, then ~5–10 seconds incremental):
@@ -92,17 +91,18 @@ React UI  ◀──listen("sidecar-event")──  app_handle.emit
 
 One sidecar process per user message (preempted on the next message). The session id is captured from the SDK's first `system/init` event and passed back on subsequent turns as `resume`, so multi-turn conversations resume the same Claude session.
 
+A separate filesystem watcher (Rust-side, via the `notify` crate) is bound to the active project's `.spec/` tree and emits a debounced `spec-files-changed` event. The frontend re-reads the spec tree on each event, so external edits show up automatically.
+
 ## Things you'll likely hit on the first run
 
 - **"tsx not found at .../node_modules/.bin/tsx"** — `yarn install` didn't run, or the workspace root is wrong.
 - **First Rust build takes forever** — that's normal; Tauri pulls a lot of crates the first time. Subsequent builds are fast.
-- **macOS Gatekeeper complains on `yarn tauri build`** — code signing isn't wired yet (week 6). For dev, `tauri dev` doesn't bundle so you won't see this.
+- **macOS Gatekeeper complains on `yarn tauri build`** — code signing isn't wired yet for distributed builds. For dev, `tauri dev` doesn't bundle so you won't see this.
 - **"Not logged in · Please run /login"** — the Agent SDK couldn't find your subscription auth. Run `claude login` and try again.
-- **Icons missing on `yarn tauri build`** — `tauri.conf.json` references icons that don't exist yet. Generate them with `yarn tauri icon path/to/source.png`. `tauri dev` doesn't need them.
+- **Icons missing on `yarn tauri build`** — generate them with `yarn tauri icon path/to/source.png`. `tauri dev` doesn't need them.
 
 ## Roadmap
 
-- **Week 3:** spec mode — `.spec/` folder convention, custom system prompt, clarifying-question loop, task list rendered from `tasks.md`.
-- **Week 4:** multi-project sidebar, multi-session per project, SQLite for metadata.
-- **Week 5:** MCP server config per project (Jira via the Atlassian MCP).
-- **Week 6:** code-sign + notarize, crash recovery, ship v0.1.
+- MCP server config per project (Jira via the Atlassian MCP, Linear, etc.).
+- Code-sign + notarize for distributed builds, crash recovery.
+- Settings panel (model selection, default permission mode, theme).
