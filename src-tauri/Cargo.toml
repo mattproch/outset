@@ -1,6 +1,6 @@
 [package]
 name = "outset"
-version = "0.0.3"
+version = "0.0.4"
 description = "Outset — spec-driven development with Claude"
 authors = ["you"]
 edition = "2021"
@@ -21,6 +21,11 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt", "macros", "time"] }
+
+# Filesystem watcher used to surface .spec/ changes to the UI without forcing
+# the user to switch projects or hit the git refresh button. macOS uses
+# FSEvents under the hood; the debounce loop in lib.rs coalesces bursts.
+notify = "6"
 
 # libc is used on Unix to send signals to the process group so that killing a
 # sidecar Node process also takes down the claude subprocess it spawned.

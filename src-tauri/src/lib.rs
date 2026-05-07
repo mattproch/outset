@@ -18,11 +18,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use notify::{Event as NotifyEvent, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc as tmpsc, Mutex};
 
 // ---------- session state ----------
 
@@ -52,6 +53,147 @@ struct SidecarEventPayload {
 #[serde(rename_all = "camelCase")]
 struct SessionExitPayload {
     session_id: String,
+}
+
+// ---------- spec file watcher ----------
+//
+// One active watcher at a time — we only show one project's spec at a time,
+// so there's no reason to keep watchers running for projects the user
+// switched away from. `watch_spec` replaces the previous entry; the Drop
+// impl on WatcherEntry tears down the notify watcher and aborts the
+// debounce task.
+//
+// Event flow:
+//   notify thread -> std mpsc -> debounce task -> Tauri "spec-files-changed"
+// The debounce task waits SPEC_DEBOUNCE_MS after the first event in a burst
+// before emitting, then drains anything else queued. Editors that save by
+// renaming a temp file (Vim, etc.) generate a flurry of events; coalescing
+// keeps the frontend from re-reading the .spec tree four times per save.
+
+const SPEC_DEBOUNCE_MS: u64 = 250;
+
+#[allow(dead_code)]
+struct WatcherEntry {
+    /// Project root the watcher is bound to. Stored for debug visibility.
+    cwd: String,
+    /// Active notify watcher. Dropped on entry replacement, which closes
+    /// the underlying FSEvents (or platform equivalent) stream.
+    watcher: RecommendedWatcher,
+    /// Aborts the debounce task that bridges notify events to Tauri events.
+    abort: tokio::task::AbortHandle,
+}
+
+impl Drop for WatcherEntry {
+    fn drop(&mut self) {
+        self.abort.abort();
+    }
+}
+
+#[derive(Default)]
+struct WatcherState {
+    /// At most one active spec watcher across the app.
+    active: Mutex<Option<WatcherEntry>>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SpecChangedPayload {
+    /// Project root whose .spec/ tree changed. The frontend filters on this
+    /// so a stale watcher (between switch and unwatch) can't trigger a
+    /// refresh on the wrong project.
+    cwd: String,
+}
+
+/// Start watching `<cwd>/.spec/` for changes. Replaces any prior watcher.
+/// If `.spec/` doesn't exist yet, this is a no-op — the next refresh after
+/// a Claude turn will create it, and the next call to `watch_spec`
+/// (typically on project re-select) will pick it up.
+#[tauri::command]
+async fn watch_spec(
+    app: AppHandle,
+    state: State<'_, WatcherState>,
+    cwd: String,
+) -> Result<(), String> {
+    let spec_dir = PathBuf::from(&cwd).join(".spec");
+
+    // Idempotent: if we're already watching this exact cwd, do nothing.
+    // Lets the frontend call watch_spec on every Claude `result` event
+    // (covers the .spec-just-created case) without thrashing the watcher
+    // on every turn. We also drop any watcher that's bound to a different
+    // cwd here so we don't briefly run two for the project being torn
+    // down.
+    {
+        let mut active = state.active.lock().await;
+        if let Some(entry) = active.as_ref() {
+            if entry.cwd == cwd && spec_dir.exists() {
+                return Ok(());
+            }
+        }
+        *active = None;
+    }
+
+    if !spec_dir.exists() {
+        return Ok(());
+    }
+
+    let (tx, mut rx) = tmpsc::unbounded_channel::<()>();
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<NotifyEvent>| {
+        if let Ok(event) = res {
+            // Filter to file-content-affecting events. Access-only events
+            // (atime updates from Spotlight, etc.) would otherwise wake the
+            // debounce loop for nothing.
+            if matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            ) {
+                let _ = tx.send(());
+            }
+        }
+    })
+    .map_err(|e| format!("init spec watcher: {e}"))?;
+
+    watcher
+        .watch(&spec_dir, RecursiveMode::Recursive)
+        .map_err(|e| format!("watch {}: {e}", spec_dir.display()))?;
+
+    let app_clone = app.clone();
+    let cwd_clone = cwd.clone();
+    let handle = tokio::spawn(async move {
+        use tokio::time::{sleep, Duration};
+        // recv() returns None when all senders are dropped (i.e. the
+        // notify watcher itself is dropped on entry replacement). That's
+        // our cue to exit gracefully — though abort() typically gets
+        // there first.
+        while rx.recv().await.is_some() {
+            sleep(Duration::from_millis(SPEC_DEBOUNCE_MS)).await;
+            // Drain everything else that piled up during the debounce
+            // window so we emit exactly once per burst.
+            while rx.try_recv().is_ok() {}
+            let _ = app_clone.emit(
+                "spec-files-changed",
+                SpecChangedPayload {
+                    cwd: cwd_clone.clone(),
+                },
+            );
+        }
+    });
+
+    let mut active = state.active.lock().await;
+    *active = Some(WatcherEntry {
+        cwd,
+        watcher,
+        abort: handle.abort_handle(),
+    });
+    Ok(())
+}
+
+/// Stop the active spec watcher, if any. Called when the selected project
+/// is cleared (no project open) and on app shutdown via React effect cleanup.
+#[tauri::command]
+async fn unwatch_spec(state: State<'_, WatcherState>) -> Result<(), String> {
+    let mut active = state.active.lock().await;
+    *active = None;
+    Ok(())
 }
 
 // ---------- persistence ----------
@@ -1218,6 +1360,7 @@ pub fn run() {
         // Used by the JS side to relaunch the app after an update.
         .plugin(tauri_plugin_process::init())
         .manage(SessionState::default())
+        .manage(WatcherState::default())
         .invoke_handler(tauri::generate_handler![
             send_message,
             load_session_history,
@@ -1239,6 +1382,8 @@ pub fn run() {
             git_set_origin,
             git_remove_origin,
             detect_project_kind,
+            watch_spec,
+            unwatch_spec,
             load_app_state,
             save_app_state
         ])

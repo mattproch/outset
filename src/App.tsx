@@ -529,10 +529,58 @@ export default function App(): ReactElement {
     [startActivity],
   );
 
-  // Refresh spec when the selected project changes.
+  // Refresh spec when the selected project changes, and start a Rust-side
+  // filesystem watcher on the project's .spec/ tree so external edits
+  // (Claude mid-turn, the user editing in their own editor, git pull,
+  // remove_task, etc.) are reflected without forcing a project switch or
+  // a manual git-refresh click. The watcher is debounced backend-side.
   useEffect(() => {
     void refreshSpec();
+    const projId = selectedProjectId;
+    const project = projId
+      ? projectsRef.current.find((p) => p.id === projId)
+      : null;
+    if (!project) {
+      void invoke("unwatch_spec").catch(() => {});
+      return;
+    }
+    void invoke("watch_spec", { cwd: project.path }).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn("watch_spec failed:", err);
+    });
+    return () => {
+      void invoke("unwatch_spec").catch(() => {});
+    };
   }, [selectedProjectId, refreshSpec]);
+
+  // Subscribe to the spec-watcher event the Rust side emits on every
+  // debounced burst of .spec/ filesystem changes. We re-check the current
+  // project against the payload so a late-firing event from a watcher
+  // that's already been replaced can't overwrite state with stale data.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ cwd: string }>("spec-files-changed", (e) => {
+      const projId = selectedProjectIdRef.current;
+      const project = projId
+        ? projectsRef.current.find((p) => p.id === projId)
+        : null;
+      if (!project || project.path !== e.payload.cwd) return;
+      void refreshSpec();
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("spec-files-changed listen failed:", err);
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [refreshSpec]);
 
   // Detect "is this an existing-code project?" so the empty-state can offer
   // a one-click "map this codebase" action on fresh spec sessions.
@@ -701,6 +749,15 @@ export default function App(): ReactElement {
             sess.projectId === selectedProjectIdRef.current
           ) {
             void refreshSpec();
+            // Also (re)attach the spec watcher: on the very first turn,
+            // .spec/ likely didn't exist when watch_spec was called from
+            // the project-change effect, so the watcher is currently a
+            // no-op. The Rust side is idempotent, so this is cheap when
+            // the watcher is already healthy.
+            const proj = projectsRef.current.find((p) => p.id === sess.projectId);
+            if (proj) {
+              void invoke("watch_spec", { cwd: proj.path }).catch(() => {});
+            }
           }
           // Stamp lastMessageAt.
           setSessions((prev) =>
@@ -1201,12 +1258,7 @@ export default function App(): ReactElement {
     setCodebaseNode({ kind: "overview" });
   }, [selectedProjectId]);
 
-  // Auto-scroll on new messages.
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [visibleMessages]);
 
   /**
    * Floating composer height. Tracked dynamically so the chat scroll's
@@ -1232,16 +1284,22 @@ export default function App(): ReactElement {
     },
     [],
   );
-  // Re-scroll to bottom when composer grows so the latest message stays visible.
+
+  // Auto-scroll on new messages — but only when the user is already
+  // pinned near the bottom. If they've scrolled up to read earlier
+  // context (or to copy something), the agent streaming new chunks
+  // should NOT yank them back down. Same threshold logic re-runs when
+  // the composer grows, so a longer input still keeps the latest line
+  // visible without disrupting an upward-reading user.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Only auto-scroll if user is already near the bottom — don't yank
-    // them away from where they were reading.
-    const nearBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight < composerHeight + 80;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // Threshold accounts for the floating composer overlap plus a bit
+    // of breathing room.
+    const nearBottom = distanceFromBottom < composerHeight + 80;
     if (nearBottom) el.scrollTop = el.scrollHeight;
-  }, [composerHeight]);
+  }, [visibleMessages, composerHeight]);
 
   // ---------- render ----------
 
